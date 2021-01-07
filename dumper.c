@@ -31,19 +31,45 @@
 #include "comm.h"
 #include "dumper.h"
 #include "crc.h"
+#include "fifo.h"
+
 
 static void (*jump_to_bootloader)(void) = (void*)0xF800;
 uint16_t flash_buffer_mask = 0xFFC0;
 
+volatile FIFO(1024) uart_tx_fifo;
+volatile FIFO(1024) uart_rx_fifo;
+
 ISR(USART0_RX_vect)
 {
-  unsigned char b;
-  while (UCSR0A & (1<<RXC0))
-  {
-    b = UDR0;
-    comm_proceed(b);
+  unsigned char rxbyte = UDR0;
+  if( !FIFO_IS_FULL( uart_rx_fifo ) ) {
+    FIFO_PUSH( uart_rx_fifo, rxbyte );
+  }
+
+//  unsigned char b;
+//  while (UCSR0A & (1<<RXC0))
+//  {
+//    b = UDR0;
+//    comm_proceed(b);
+//  }
+}
+
+ISR( USART0_UDRE_vect )
+{
+  if( FIFO_IS_EMPTY( uart_tx_fifo ) ) {
+    //если данных в fifo больше нет то запрещаем это прерывание
+    //UCSRB &amp;= ~( 1 &lt;&lt; UDRIE );
+    UCSR0B &= ~(1 << UDRIE0);
+  }
+  else {
+    //иначе передаем следующий байт
+    char txbyte = FIFO_FRONT( uart_tx_fifo );
+    FIFO_POP( uart_tx_fifo );
+    UDR0 = txbyte;
   }
 }
+
 
 static void set_flash_buffer_size(uint16_t value)
 {
@@ -304,7 +330,7 @@ static void erase_flash_sector()
   // waiting for result
   while (1)
   {
-    if (TCNT1 >= 23437) // 3 seconds
+    if (TCNT1 >= 46874) // 3 seconds
     {
       // timeout
       comm_start(COMMAND_FLASH_ERASE_TIMEOUT, 0);
@@ -380,7 +406,7 @@ static void write_flash(uint16_t address, uint16_t len, uint8_t* data)
       // waiting for result
       while (1)
       {
-        if (TCNT1 >= 7812) // 1 second
+        if (TCNT1 >= 7812*2) // 1 second
         {
           // timeout
           comm_start(COMMAND_FLASH_WRITE_TIMEOUT, 0);
@@ -792,12 +818,15 @@ static void reset_phi2()
 int main (void)
 {
   sei();
+
   USART_init();
   init_ports();
 
   LED_RED_OFF;
   LED_GREEN_OFF;  
   
+  FIFO_FLUSH(uart_tx_fifo);
+  FIFO_FLUSH(uart_rx_fifo);
   comm_init();
   comm_start(COMMAND_PRG_STARTED, 0);
 
@@ -807,7 +836,9 @@ int main (void)
   unsigned long int t = 0;
   char led_down = 0;
   int led_bright = 0;
+  int ret;  
   
+
   while (1)
   {
     // PWM for leds
@@ -836,6 +867,19 @@ int main (void)
       t = 0;
     }
     
+    cli(); //запрещаем прерывания
+    if( !FIFO_IS_EMPTY( uart_rx_fifo ) ) {
+      //если в буфере есть данные, то извлекаем их
+      ret = FIFO_FRONT( uart_rx_fifo );
+      FIFO_POP( uart_rx_fifo );
+    }
+    else {
+      ret = -1; //данных нет
+    }
+    sei(); //разрешаем прерывания
+
+    if (ret != -1) comm_proceed(ret);
+
     if (comm_recv_done)
     {
       comm_recv_done = 0;

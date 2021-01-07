@@ -40,7 +40,7 @@
 // #define F_CPU 7372800
 //#define F_CPU (7372800/2)
 //#define F_CPU 11059200UL
-#define F_CPU 8000000UL
+#define F_CPU 16000000UL
 #endif
 
 /* UART Скорость UART оптимально 19200 */

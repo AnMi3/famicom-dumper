@@ -37,7 +37,7 @@
 # user defined values
 
 # MCU name
-F_CPU = 8000000UL
+F_CPU = 16000000UL
 BAUDRATE = 19200
 MCU = atmega64
 LFUSE          = E4
